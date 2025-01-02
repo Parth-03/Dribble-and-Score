@@ -1,0 +1,144 @@
+import heapq
+import numpy as np
+from FootballMDP import *
+
+class PrioritizedSweeping:
+    def __init__(self, env, gamma=0.99, theta=0.1, alpha=0.1):
+        self.env = env
+        self.gamma = gamma
+        self.theta = theta  # Threshold for adding to the priority queue
+        self.alpha = alpha  # Learning rate
+
+        # Q-table
+        self.q_table = {}
+        self.model = {}  # Transition and reward model
+        self.priority_queue = []
+
+        # Action space
+        self.actions = ['up', 'down', 'left', 'right', 'shoot']
+
+    def initialize_state(self, state):
+        """Initialize Q-values and model entries for a new state."""
+        if state not in self.q_table:
+            self.q_table[state] = {a: 0.0 for a in self.actions}
+            self.model[state] = {a: {'transitions': {}, 'reward': 0.0} for a in self.actions}
+
+    def update_model(self, state, action, reward, next_state):
+        """Update the transition and reward model."""
+        self.initialize_state(state)
+        self.initialize_state(next_state)
+
+        # Update reward
+        self.model[state][action]['reward'] = reward
+
+        # Update transitions
+        if next_state not in self.model[state][action]['transitions']:
+            self.model[state][action]['transitions'][next_state] = 0
+        self.model[state][action]['transitions'][next_state] += 1
+
+    def compute_td_error(self, state, action):
+        """Compute the TD error for a state-action pair."""
+        reward = self.model[state][action]['reward']
+        transitions = self.model[state][action]['transitions']
+
+        # Compute expected next value
+        expected_q_next = 0
+        total_transitions = sum(transitions.values())
+        for next_state, count in transitions.items():
+            prob = count / total_transitions
+            max_q_next = max(self.q_table[next_state].values()) if next_state in self.q_table else 0
+            expected_q_next += prob * max_q_next
+
+        # TD error
+        td_target = reward + self.gamma * expected_q_next
+        td_error = td_target - self.q_table[state][action]
+        return td_error
+
+    def select_action(self, state, epsilon=0.1):
+        """Select an action using epsilon-greedy."""
+        if np.random.rand() < epsilon:
+            return np.random.choice(self.actions)
+        return max(self.q_table[state], key=self.q_table[state].get)
+
+    def train(self, num_episodes=100):
+        for episode in range(num_episodes):
+            state = self.env.reset()
+            self.initialize_state(state)
+
+            while True:
+                action = self.select_action(state)
+                next_state, reward, done, _ = self.env.step(action)
+
+                # Update model
+                self.update_model(state, action, reward, next_state)
+
+                # Compute TD error
+                td_error = self.compute_td_error(state, action)
+                if abs(td_error) > self.theta:
+                    heapq.heappush(self.priority_queue, (-abs(td_error), state, action))
+
+                # Update Q-values from priority queue
+                while self.priority_queue:
+                    _, s, a = heapq.heappop(self.priority_queue)
+                    self.update_q_value(s, a)
+
+                if done:
+                    break
+                state = next_state
+
+            if (episode + 1) % 10 == 0:
+                print(f"Episode {episode + 1}/{num_episodes} completed.")
+
+    def update_q_value(self, state, action):
+        """Perform a Q-value update."""
+        # Retrieve transition model for this state-action pair
+        transitions = self.model[state][action]['transitions']
+        reward = self.model[state][action]['reward']
+
+        # Compute expected next value
+        expected_q_next = 0
+        total_transitions = sum(transitions.values())
+        for next_state, count in transitions.items():
+            prob = count / total_transitions
+            max_q_next = max(self.q_table[next_state].values()) if next_state in self.q_table else 0
+            expected_q_next += prob * max_q_next
+
+        # Update Q-value
+        td_target = reward + self.gamma * expected_q_next
+        self.q_table[state][action] += self.alpha * (td_target - self.q_table[state][action])
+
+        # Recompute priorities for predecessors
+        for s, a in self.get_predecessors(state):
+            td_error = self.compute_td_error(s, a)
+            if abs(td_error) > self.theta:
+                heapq.heappush(self.priority_queue, (-abs(td_error), s, a))
+
+    def get_predecessors(self, state):
+        """Find predecessors of a state."""
+        predecessors = []
+        for s in self.model:
+            for a in self.actions:
+                if state in self.model[s][a]['transitions']:
+                    predecessors.append((s, a))
+        return predecessors
+
+    def evaluate_policy(self):
+        """Evaluate the learned policy."""
+        state = self.env.reset()
+        total_reward = 0
+        while True:
+            action = self.select_action(state, epsilon=0)
+            state, reward, done, _ = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return total_reward
+
+
+
+env = FootballSimulatorMDP(grid_size=(10, 5), n_opponents=5, delta=1)
+agent = PrioritizedSweeping(env, gamma=0.99, theta=0.1, alpha=0.1)
+agent.train(num_episodes=500)
+
+total_reward = agent.evaluate_policy()
+print(f"Total Reward from Evaluation: {total_reward}")

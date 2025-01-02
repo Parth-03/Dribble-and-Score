@@ -1,0 +1,114 @@
+import numpy as np
+import random
+from FootballMDP import *
+
+class EpisodicNStepSARSA:
+    def __init__(self, env, n=3, alpha=0.1, gamma=0.99, epsilon=0.1):
+        self.env = env
+        self.n = n  # Number of steps
+        self.alpha = alpha  # Learning rate
+        self.gamma = gamma  # Discount factor
+        self.epsilon = epsilon  # Exploration rate
+
+        # Feature vector size: State dimension (x, y) + Action space (one-hot)
+        self.feature_dim = 2 + len(['up', 'down', 'left', 'right', 'shoot'])
+        self.weights = np.zeros(self.feature_dim)
+
+        # Actions
+        self.actions = ['up', 'down', 'left', 'right', 'shoot']
+
+    def feature_function(self, state, action):
+        """Generate a feature vector for a state-action pair."""
+        player_pos = np.array(state)  # x, y position
+        action_encoding = np.zeros(len(self.actions))
+        action_encoding[self.actions.index(action)] = 1
+        return np.concatenate((player_pos, action_encoding))
+
+    def q_value(self, state, action):
+        """Compute Q(s, a) as w^T x(s, a)."""
+        features = self.feature_function(state, action)
+        return np.dot(self.weights, features)
+
+    def epsilon_greedy_policy(self, state):
+        """Choose an action using an epsilon-greedy policy."""
+        if np.random.rand() < self.epsilon:
+            return random.choice(self.actions)
+        q_values = [self.q_value(state, action) for action in self.actions]
+        return self.actions[np.argmax(q_values)]
+
+    def train(self, num_episodes=1000):
+        for episode in range(num_episodes):
+            if episode%500 ==0:
+                self.epsilon = self.epsilon/2
+            state = self.env.reset()
+            action = self.epsilon_greedy_policy(state)
+
+            states = [state]
+            actions = [action]
+            rewards = []
+
+            T = float('inf')  # Time step where the episode ends
+            t = 0  # Current time step
+
+            while True:
+                if t < T:
+                    next_state, reward, done, _ = self.env.step(action)
+                    rewards.append(reward)
+
+                    if done:
+                        T = t + 1
+                    else:
+                        next_action = self.epsilon_greedy_policy(next_state)
+                        states.append(next_state)
+                        actions.append(next_action)
+
+                tau = t - self.n + 1
+                if tau >= 0:
+                    # Compute n-step return
+                    G = sum(
+                        self.gamma**(k - tau) * rewards[k]
+                        for k in range(tau, min(tau + self.n, T))
+                    )
+                    if tau + self.n < T:
+                        G += self.gamma**self.n * self.q_value(states[tau + self.n], actions[tau + self.n])
+
+                    # Update weights
+                    state_tau = states[tau]
+                    action_tau = actions[tau]
+                    features = self.feature_function(state_tau, action_tau)
+                    delta = G - self.q_value(state_tau, action_tau)
+                    self.weights += self.alpha * delta * features
+
+                if tau == T - 1:
+                    break
+
+                t += 1
+                if t < T:
+                    state, action = states[t], actions[t]
+
+            if (episode + 1) % 100 == 0:
+                print(f"Episode {episode + 1}/{num_episodes} completed.")
+
+    def evaluate_policy(self):
+        """Evaluate the learned policy."""
+        state = self.env.reset()
+        total_reward = 0
+        while True:
+            action = self.epsilon_greedy_policy(state)
+            state, reward, done, _ = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return total_reward
+    
+    # Example usage
+env = FootballSimulatorMDP(grid_size=(10, 5), n_opponents=5, delta=1)
+
+agent = EpisodicNStepSARSA(env, n=1, alpha=0.2, gamma=0.99, epsilon=0.5)
+agent.train(num_episodes=10000)
+
+# Evaluate the agent
+print("Evaluating Policy...")
+total_reward = agent.evaluate_policy()
+print(f"Total Reward from Evaluation: {total_reward}")
+

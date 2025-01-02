@@ -1,0 +1,188 @@
+import numpy as np
+import random
+from matplotlib.patches import Circle, Rectangle
+from FootballMDP import *
+
+class SARSA:
+    def __init__(self, env, alpha=0.1, gamma=0.99, epsilon=0.1):
+        self.env = env
+        self.alpha = alpha  # Learning rate
+        self.gamma = gamma  # Discount factor
+        self.epsilon = epsilon  # Exploration rate
+
+        # Initialize Q-table
+        self.q_table = {}
+
+        # Actions
+        self.actions = ['up', 'down', 'left', 'right', 'shoot']
+
+    def initialize_state(self, state):
+        """Initialize Q-values for a state if not already initialized."""
+        if state not in self.q_table:
+            self.q_table[state] = {a: 0.0 for a in self.actions}
+
+    def select_action(self, state):
+        """Choose an action using epsilon-greedy policy."""
+        self.initialize_state(state)
+        if random.random() < self.epsilon:
+            return random.choice(self.actions)
+        return max(self.q_table[state], key=self.q_table[state].get)
+
+    def train(self, num_episodes=1000):
+        reward_data = []
+        episode_data = []
+        for episode in range(num_episodes):
+            if episode%500 ==0:
+                self.epsilon = self.epsilon/2
+            state = self.env.reset()
+            self.initialize_state(state)
+            G=0
+
+            # Choose initial action
+            action = self.select_action(state)
+
+            total_reward = 0
+            while True:
+                # Take action, observe reward and next state
+                next_state, reward, done, _ = self.env.step(action)
+                G+=reward
+                self.initialize_state(next_state)
+
+                # Choose next action
+                next_action = self.select_action(next_state)
+
+                # SARSA Update
+                td_target = reward + self.gamma * self.q_table[next_state][next_action]
+                td_error = td_target - self.q_table[state][action]
+                self.q_table[state][action] += self.alpha * td_error
+
+                # Update state and action
+                state, action = next_state, next_action
+                total_reward += reward
+
+                if done:
+                    break
+
+            if (episode + 1) % 100 == 0:
+                print(f"Episode {episode + 1}/{num_episodes}: Total Reward = {total_reward}")
+
+            reward_data.append(G)
+            episode_data.append(episode)
+
+        plt.scatter(episode_data, reward_data)
+        plt.xlabel('Episodes')
+        plt.ylabel('Total Rewards')
+        plt.show()
+
+    def get_greedy_policy(self):
+        """Get the greedy policy for the entire grid."""
+        policy_grid = np.full(self.env.grid_size, '', dtype='<U10')
+        for x in range(self.env.grid_size[0]):
+            for y in range(self.env.grid_size[1]):
+                state = (x, y)  # Mock opponents for visualization
+                actions = ['up', 'down', 'left', 'right', 'shoot']
+                #q_values = [self.q_table[state][action] for action in actions]
+                if state not in self.q_table:
+                    best_action = 'None'
+                else:
+                    best_action =  max(self.q_table[state], key=self.q_table[state].get)
+                policy_grid[x, y] = best_action
+        return policy_grid
+
+    def visualize_policy(self):
+        """Visualize the greedy policy on the grid."""
+        policy_grid = self.get_greedy_policy()
+        print(policy_grid)
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.set_title("Greedy Policy Visualization")
+        ax.set_xlim(0, self.env.grid_size[0])
+        ax.set_ylim(0, self.env.grid_size[1])
+        ax.set_xticks(range(self.env.grid_size[0]))
+        ax.set_yticks(range(self.env.grid_size[1]))
+        ax.grid(False)
+
+        for x in range(self.env.grid_size[0]):
+            for y in range(self.env.grid_size[1]):
+                action = policy_grid[x, y]
+                if (x,y) in self.env.opponents:
+                    ax.text(x, y, ' ', ha='center', va='center', fontsize=10)
+                elif action == 'up':
+                    ax.text(x, y, '↑', ha='center', va='center', fontsize=20)
+                elif action == 'down':
+                    ax.text(x, y, '↓', ha='center', va='center', fontsize=20)
+                elif action == 'left':
+                    ax.text(x, y, '←', ha='center', va='center', fontsize=20)
+                elif action == 'right':
+                    ax.text(x, y, '→', ha='center', va='center', fontsize=20)
+                elif action == 'shoot':
+                    ax.text(x, y, 'SHOOT!', ha='center', va='center', fontsize=10)
+
+        plt.show()
+    
+    def visualize_episode(self, show_trajectory=True):
+        state = self.env.reset()
+        print("Initial State:", state)
+        trajectory = [state]
+        
+        plt.figure(figsize=(10, 5))
+        ax = plt.gca()
+        ax.set_xlim(0, self.env.grid_size[0])
+        ax.set_ylim(0, self.env.grid_size[1])
+        ax.set_aspect('equal')
+        ax.set_title("Football Simulator - Agent Movement")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        
+        # Draw the goal
+        goal_x, goal_y = self.env.goal
+        ax.add_patch(Rectangle((goal_x-0.1, goal_y -0.1), 0.5, 0.5, color='gold', alpha=0.5, label="Goal"))
+
+        # Draw opponents
+        for opp_x, opp_y in self.env.opponents:
+            ax.add_patch(Circle((opp_x, opp_y), 0.1, color='red', alpha=0.7, label="Opponent"))
+
+        # agent_x, agent_y = state
+        # ax.add_patch(Circle((agent_x, agent_y), 0.1, color='blue', label="Agent"))
+
+        # plt.legend(loc="upper left")
+        # plt.show()
+
+        done = False
+        while not done:
+            action = self.select_action(state)
+            state, reward, done, info = self.env.step(action)
+            if len(info)!=0:
+                print(f"Action: {action}, State: {state}, Reward: {reward}, XG: {info} Done: {done}")
+            else:
+                print(f"Action: {action}, State: {state}, Reward: {reward}, Done: {done}")
+            #ax.plot(state, color='blue', linewidth=1, alpha=0.7)
+            trajectory.append(state)
+
+        # Draw the trajectory
+        if show_trajectory:
+            for i in range(1, len(trajectory)):
+                x1, y1 = trajectory[i - 1]
+                x2, y2 = trajectory[i]
+                ax.plot([x1, x2], [y1, y2], color='blue', linewidth=2, alpha=0.7)
+
+        # Draw the agent's final position
+        agent_x, agent_y = state
+        ax.add_patch(Circle((agent_x, agent_y), 0.1, color='blue', alpha = 0.7, label="Agent"))
+
+        plt.legend(loc="upper left")
+        plt.show()
+
+
+
+# Example usage
+env = FootballSimulatorMDP(grid_size=(10, 5), n_opponents=5, delta=1)
+
+agent = SARSA(env, alpha=0.2, gamma=0.99, epsilon=0.5)
+agent.train(num_episodes=10000)
+
+agent.visualize_policy()
+
+# Visualize an episode
+for _ in range(5):
+    agent.visualize_episode(show_trajectory=True)

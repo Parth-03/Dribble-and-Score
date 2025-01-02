@@ -1,0 +1,144 @@
+import numpy as np
+import random
+from FootballMDP import *
+
+class TabularREINFORCEWithBaseline:
+    def __init__(self, env, gamma=0.99, alpha_policy=0.1, alpha_value=0.1, epsilon = 0.1):
+        self.env = env
+        self.gamma = gamma
+        self.alpha_policy = alpha_policy
+        self.alpha_value = alpha_value
+        self.epsilon = epsilon
+
+        # Initialize policy and value tables
+        self.policy_table = {}
+        self.value_table = {}
+
+        # Initialize the action space
+        self.actions = ['up', 'down', 'left', 'right', 'shoot']
+
+    def get_policy(self, state):
+        """Retrieve or initialize policy for a state."""
+        if state not in self.policy_table:
+            self.policy_table[state] = np.ones(len(self.actions)) / len(self.actions)
+        return self.policy_table[state]
+
+    def get_value(self, state):
+        """Retrieve or initialize value for a state."""
+        if state not in self.value_table:
+            self.value_table[state] = 0.0
+        return self.value_table[state]
+
+    def select_action(self, state):
+        """Select an action based on the policy."""
+        policy = self.get_policy(state)
+        if np.random.uniform() < self.epsilon:            
+            return np.random.choice(self.actions, p=policy)
+        else:
+            index = np.argmax(policy)
+            return self.actions[index]
+
+    def compute_returns(self, rewards):
+        """Compute discounted returns."""
+        returns = []
+        G = 0
+        for r in reversed(rewards):
+            G = r + self.gamma * G
+            returns.insert(0, G)
+        return returns
+
+    def train(self, num_episodes=1000):
+        reward_data = []
+        episode_data = []
+        for episode in range(num_episodes):
+            state = self.env.reset()
+            states, actions, rewards = [], [], []
+            G_temp = 0
+
+            # Generate an episode
+            while True:
+                action = self.select_action(state)
+                next_state, reward, done, _ = self.env.step(action)
+                G_temp+=reward
+
+                states.append(state)
+                actions.append(self.actions.index(action))
+                rewards.append(reward)
+
+                state = next_state
+                if done:
+                    break
+
+            # Compute returns
+            returns = self.compute_returns(rewards)
+
+            # Update policy and value functions
+            for t, state in enumerate(states):
+                action = actions[t]
+                G = returns[t]
+                baseline = self.get_value(state)
+
+                # Advantage
+                advantage = G - baseline
+
+                # Update value table
+                self.value_table[state] += self.alpha_value * (G - baseline)
+
+                # # Update policy table
+                # policy = self.get_policy(state)
+                # policy[action] += self.alpha_policy * advantage * (1 - policy[action])
+                # for a in range(len(self.actions)):
+                #     if a != action:
+                #         policy[a] -= self.alpha_policy * advantage * policy[a]
+
+                # Update policy table
+                policy = self.get_policy(state)
+
+                # Update the chosen action probability
+                policy[action] += self.alpha_policy * advantage * (1 - policy[action])
+
+                # Update other actions
+                for a in range(len(self.actions)):
+                    if a != action:
+                        policy[a] -= self.alpha_policy * advantage * policy[a]
+
+                # Normalize and clip probabilities
+                policy = np.clip(policy, 0, 1)
+                policy /= np.sum(policy)
+
+                # Save the updated policy back to the table
+                self.policy_table[state] = policy
+
+            if (episode + 1) % 100 == 0:
+                print(f"Episode {episode + 1}/{num_episodes}: Total Reward = {sum(rewards)}")
+
+            reward_data.append(G_temp)
+            episode_data.append(episode)
+
+        plt.scatter(episode_data, reward_data)
+        plt.show()
+
+    def evaluate_policy(self):
+        """Evaluate the learned policy."""
+        state = self.env.reset()
+        total_reward = 0
+        while True:
+            policy = self.get_policy(state)
+            action = np.random.choice(self.actions, p=policy)
+            state, reward, done, _ = self.env.step(action)
+            total_reward += reward
+            if done:
+                break
+        return total_reward
+
+
+# Example Usage
+env = FootballSimulatorMDP(grid_size=(10, 5), n_opponents=5, delta=1)
+
+agent = TabularREINFORCEWithBaseline(env, gamma=0.99, alpha_policy=0.1, alpha_value=0.1)
+agent.train(num_episodes=10000)
+
+# Evaluate the agent
+print("Evaluating Policy...")
+total_reward = agent.evaluate_policy()
+print(f"Total Reward from Evaluation: {total_reward}")

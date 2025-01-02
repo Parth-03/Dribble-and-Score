@@ -1,0 +1,98 @@
+import numpy as np
+from FootballMDP import *
+
+class ValueIteration:
+    def __init__(self, env, gamma=0.99, theta=1e-6):
+        self.env = env
+        self.gamma = gamma  # Discount factor
+        self.theta = theta  # Convergence threshold
+
+        # Initialize value table and policy
+        self.value_table = {}
+        self.policy_table = {}
+        self.actions = ['up', 'down', 'left', 'right', 'shoot']
+
+    def initialize_state(self, state):
+        """Initialize value and policy for a state."""
+        if state not in self.value_table:
+            self.value_table[state] = 0.0
+            self.policy_table[state] = random.choice(self.actions)  # Default random policy
+
+    def one_step_lookahead(self, state):
+        """Compute the value of each action for a given state."""
+        action_values = {}
+        for action in self.actions:
+            self.env.player_pos = state  # Set the current state
+            next_state, reward, done, _ = self.env.step(action)
+            next_value = self.value_table.get(next_state, 0.0)
+            action_values[action] = reward + (self.gamma * next_value if not done else 0)
+        return action_values
+
+    def train(self, num_iterations=1000):
+        """Perform value iteration."""
+        for _ in range(num_iterations):
+            delta = 0
+            for x in range(self.env.grid_size[0]):
+                for y in range(self.env.grid_size[1]):
+                    state = (x, y)
+                    self.initialize_state(state)
+
+                    # Perform a one-step lookahead to find the best action value
+                    action_values = self.one_step_lookahead(state)
+                    best_action_value = max(action_values.values())
+
+                    # Update the value table and calculate the change
+                    delta = max(delta, abs(self.value_table[state] - best_action_value))
+                    self.value_table[state] = best_action_value
+
+            # Convergence check
+            if delta < self.theta:
+                break
+
+        # Extract policy from the value function
+        for x in range(self.env.grid_size[0]):
+            for y in range(self.env.grid_size[1]):
+                state = (x, y)
+                self.initialize_state(state)
+                action_values = self.one_step_lookahead(state)
+                self.policy_table[state] = max(action_values, key=action_values.get)
+
+    def evaluate_policy(self):
+        """Evaluate the learned policy."""
+        state = self.env.reset()
+        total_reward = 0
+        while True:
+            action = self.policy_table.get(state, 'shoot')  # Default to 'shoot' if no policy
+            next_state, reward, done, _ = self.env.step(action)
+            total_reward += reward
+            state = next_state
+            if done:
+                break
+        return total_reward
+
+    def visualize_policy(self):
+        """Visualize the learned policy on the grid."""
+        grid_size = self.env.grid_size
+        policy_grid = np.empty(grid_size, dtype=str)
+
+        for x in range(grid_size[0]):
+            for y in range(grid_size[1]):
+                state = (x, y)
+                policy_grid[x, y] = self.policy_table.get(state, ".")[0].upper()
+
+        print("Policy Grid:")
+        print(policy_grid)
+
+# Example usage
+env = FootballSimulatorMDP(grid_size=(10, 5), n_opponents=5, delta=1)
+
+agent = ValueIteration(env, gamma=0.99, theta=1e-6)
+agent.train()
+
+# Evaluate the agent
+print("Evaluating Policy...")
+total_reward = agent.evaluate_policy()
+print(f"Total Reward from Evaluation: {total_reward}")
+
+# Visualize the policy
+agent.visualize_policy()
